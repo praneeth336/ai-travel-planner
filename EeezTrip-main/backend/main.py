@@ -550,20 +550,82 @@ def _build_daily_plan(destination: str, mood_key: str, days: int, start_date: st
     return plan
 
 
-def _build_cost_breakdown(budget: int, mood_key: str) -> CostBreakdown:
+def _build_cost_breakdown(budget: int, mood_key: str, destination: str = "") -> CostBreakdown:
+    # Check if international
+    dest = destination.lower()
+    is_intl = any(x in dest for x in ["bali", "paris", "tokyo", "dubai", "london", "new york", "maldives", "singapore", "thailand", "vietnam", "usa", "europe", "japan"])
+    
+    currency_symbol = "USD" if is_intl else "INR"
+    rate = 83.0 if is_intl else 1.0
+    
     md = _mood_data(mood_key)
     act_ratio = md["activity_ratio"]
-    acc = int(budget * 0.38)
-    food = int(budget * 0.25)
-    transport = int(budget * 0.15)
-    activities = int(budget * act_ratio)
-    misc = budget - acc - food - transport - activities
+    acc = int((budget * 0.38) / rate)
+    food = int((budget * 0.25) / rate)
+    transport = int((budget * 0.15) / rate)
+    activities = int((budget * act_ratio) / rate)
+    
+    total_converted = int(budget / rate)
+    misc = total_converted - acc - food - transport - activities
+    
     return CostBreakdown(
-        accommodation=acc,
-        food=food,
-        transport=transport,
-        activities=activities,
-        misc=max(misc, 0),
+        accommodation=[
+            BudgetItem(
+                item="Recommended Stay",
+                source="Estimated",
+                calculation="Standard boutique stay",
+                cost=acc,
+                currency=currency_symbol,
+                type="fixed",
+                notes="Comfortable accommodations suited to mood"
+            )
+        ],
+        food=[
+            BudgetItem(
+                item="Dining & Meals",
+                source="Estimated",
+                calculation="Daily dining budget",
+                cost=food,
+                currency=currency_symbol,
+                type="variable",
+                notes="Cozy and popular local eats"
+            )
+        ],
+        transport=[
+            BudgetItem(
+                item="Transportation",
+                source="Estimated",
+                calculation="Local transits and transfers",
+                cost=transport,
+                currency=currency_symbol,
+                type="variable",
+                notes="Fares and fuel estimates"
+            )
+        ],
+        activities=[
+            BudgetItem(
+                item="Experiences & Excursions",
+                source="Estimated",
+                calculation="Selected excursions",
+                cost=activities,
+                currency=currency_symbol,
+                type="variable",
+                notes="Entry fees and tour guides"
+            )
+        ],
+        other=[
+            BudgetItem(
+                item="Miscellaneous Expenses",
+                source="Estimated",
+                calculation="Buffer",
+                cost=max(misc, 0),
+                currency=currency_symbol,
+                type="variable",
+                notes="Personal expenses and shopping"
+            )
+        ],
+        total=total_converted,
+        confidence="Medium"
     )
 
 
@@ -1022,7 +1084,7 @@ def build_fast_trip(req: TripRequest) -> TripResponse:
         "Unforgettable scenic views",
     ])
     daily_plan = _build_daily_plan(destination, mood_key, days, req.start_date)
-    cost_breakdown = _build_cost_breakdown(req.budget, mood_key)
+    cost_breakdown = _build_cost_breakdown(req.budget, mood_key, destination)
     food_list = FOOD_BY_DESTINATION_MOOD.get(mood_key, [
         f"Signature {destination} street food",
         "Local spiced tea or coffee",
@@ -1299,18 +1361,59 @@ def recommend_trip(req: TripRequest):
         try:
             final_dest = trip.destination or req.destination
             if final_dest:
+                dest = final_dest.lower()
+                is_intl = any(x in dest for x in ["bali", "paris", "tokyo", "dubai", "london", "new york", "maldives", "singapore", "thailand", "vietnam", "usa", "europe", "japan"])
+                rate = 83.0 if is_intl else 1.0
+                currency_symbol = "USD" if is_intl else "INR"
+                
                 hotel_opts = get_hotel_prices(final_dest)
                 valid_hotels = [h.price_inr for h in hotel_opts if h.price_inr]
                 if valid_hotels:
                     avg_hotel = sum(valid_hotels) / len(valid_hotels)
-                    trip.estimated_cost_breakdown.accommodation = int(avg_hotel * req.days)
+                    converted_cost = int((avg_hotel * req.days) / rate)
+                    trip.estimated_cost_breakdown.accommodation = [
+                        BudgetItem(
+                            item="Live Hotel Price",
+                            source="SerpApi",
+                            calculation=f"Average hotel price * {req.days} days",
+                            cost=converted_cost,
+                            currency=currency_symbol,
+                            type="fixed",
+                            notes="Real-time average hotel options matching budget"
+                        )
+                    ]
                     
             if req.origin and final_dest:
+                dest = final_dest.lower()
+                is_intl = any(x in dest for x in ["bali", "paris", "tokyo", "dubai", "london", "new york", "maldives", "singapore", "thailand", "vietnam", "usa", "europe", "japan"])
+                rate = 83.0 if is_intl else 1.0
+                currency_symbol = "USD" if is_intl else "INR"
+                
                 transport_opts = get_transport_prices(req.origin, final_dest)
                 valid_transports = [t.price_inr for t in transport_opts if t.price_inr]
                 if valid_transports:
                     avg_transport = sum(valid_transports) / len(valid_transports)
-                    trip.estimated_cost_breakdown.transport = int(avg_transport * 2)
+                    converted_cost = int((avg_transport * 2) / rate)
+                    trip.estimated_cost_breakdown.transport = [
+                        BudgetItem(
+                            item="Live Transport Price",
+                            source="SerpApi",
+                            calculation="Average transit / flight price * 2 ways",
+                            cost=converted_cost,
+                            currency=currency_symbol,
+                            type="variable",
+                            notes="Real-time flight and transit fare average"
+                        )
+                    ]
+                    
+            # Recalculate total cost based on synced category values
+            trip.estimated_cost_breakdown.total = (
+                sum(item.cost for item in trip.estimated_cost_breakdown.accommodation) +
+                sum(item.cost for item in trip.estimated_cost_breakdown.food) +
+                sum(item.cost for item in trip.estimated_cost_breakdown.transport) +
+                sum(item.cost for item in trip.estimated_cost_breakdown.activities) +
+                sum(item.cost for item in trip.estimated_cost_breakdown.other)
+            )
         except Exception as e:
             print(f"Failed to sync live prices to budget: {e}")
 
