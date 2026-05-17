@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MessageSquare, Send, X, Bot, User, Minimize2, Trash2, Square, Mic, Volume2, VolumeX } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { voiceAssistant } from '../lib/voice';
 import { fetchChatReply, reviseRecommendation, transcribeAudio } from '../api/client';
 import { useTripStore } from '../state/tripStore';
+import { geminiChat } from '../lib/gemini';
 import { Recommendation, TripPreferences } from '../types';
 
 interface Message {
@@ -46,8 +48,9 @@ If user asks for a plan change, suggest clear next edits.`;
     .map((d) => `Day ${d.day}: ${d.title} | Morning: ${d.morning} | Afternoon: ${d.afternoon} | Evening: ${d.evening}`)
     .join('\n');
   const costs = recommendation.estimated_cost_breakdown;
-  const total =
-    costs.accommodation + costs.food + costs.transport + costs.activities + costs.misc;
+  const sumCat = (items: any) => Array.isArray(items) ? items.reduce((acc: number, i: any) => acc + (i.cost || 0), 0) : 0;
+  const total = recommendation.estimated_cost_breakdown.total || 
+    (sumCat(costs.accommodation) + sumCat(costs.food) + sumCat(costs.transport) + sumCat(costs.activities) + sumCat(costs.other));
 
   return `Use this as the user's current itinerary context. When answering, refer to these details naturally.
 Preferences:
@@ -67,7 +70,7 @@ Itinerary:
 - Must try food: ${foods}
 - Insider tips: ${tips}
 - Cost total: ₹${total.toLocaleString('en-IN')}
-- Cost split: stay ₹${costs.accommodation.toLocaleString('en-IN')}, food ₹${costs.food.toLocaleString('en-IN')}, transport ₹${costs.transport.toLocaleString('en-IN')}, activities ₹${costs.activities.toLocaleString('en-IN')}, misc ₹${costs.misc.toLocaleString('en-IN')}
+- Cost split: stay ₹${sumCat(costs.accommodation).toLocaleString('en-IN')}, food ₹${sumCat(costs.food).toLocaleString('en-IN')}, transport ₹${sumCat(costs.transport).toLocaleString('en-IN')}, activities ₹${sumCat(costs.activities).toLocaleString('en-IN')}, other ₹${sumCat(costs.other).toLocaleString('en-IN')}
 - Day plan excerpt:
 ${firstDays}`;
 }
@@ -197,7 +200,19 @@ export const ChatBot: React.FC = () => {
         ...chatMessages,
       ];
 
-      const fullResponse = await fetchChatReply(payloadMessages, abortControllerRef.current.signal);
+      let fullResponse = "";
+      try {
+        fullResponse = await fetchChatReply(payloadMessages, abortControllerRef.current.signal);
+      } catch (err) {
+        console.log("Backend offline or request failed. Switching to direct Online AI...", err);
+      }
+      
+      // Smart Fallback: If backend is in "offline" or "standard" mode, use direct Gemini API
+      if (!fullResponse || fullResponse.includes("offline mode") || fullResponse.includes("standard mode")) {
+        console.log("Using direct Online AI...");
+        fullResponse = await geminiChat(payloadMessages);
+      }
+
       setMessages((prev) => {
         const next = [...prev];
         const pendingIndex = next.map((m) => m.content).lastIndexOf(PENDING_REPLY);
@@ -357,8 +372,8 @@ export const ChatBot: React.FC = () => {
                 <div>
                   <h3 className="font-bold text-sm tracking-tight">Travel Expert AI</h3>
                   <div className="flex items-center gap-1.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                    <span className="text-[10px] uppercase font-black tracking-widest opacity-50">Active</span>
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] uppercase font-black tracking-widest text-emerald-400">Online</span>
                   </div>
                 </div>
               </div>
@@ -416,9 +431,25 @@ export const ChatBot: React.FC = () => {
                     <div className={`p-4 rounded-2xl text-sm leading-relaxed shadow-sm ${
                       msg.role === 'user'
                         ? 'bg-gradient-to-r from-sky-600 to-sky-700 text-white rounded-tr-none'
-                        : 'bg-white text-slate-700 border border-sky-200 rounded-tl-none'
+                        : 'bg-white text-slate-700 border border-sky-200 rounded-tl-none prose prose-sm prose-p:mb-2 prose-ul:list-disc prose-ul:pl-4 prose-li:mb-1 max-w-full overflow-hidden'
                     }`}>
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                      {msg.role === 'user' ? (
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                      ) : (
+                        <div className="space-y-2">
+                          <ReactMarkdown
+                            components={{
+                              p: ({node, ...props}) => <p className="mb-2" {...props} />,
+                              ul: ({node, ...props}) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                              ol: ({node, ...props}) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+                              li: ({node, ...props}) => <li className="pl-1" {...props} />,
+                              strong: ({node, ...props}) => <strong className="font-semibold text-sky-900" {...props} />,
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </motion.div>
@@ -500,7 +531,7 @@ export const ChatBot: React.FC = () => {
               <div className="flex items-center justify-center gap-1.5 mt-3 grayscale opacity-40">
                 <div className="w-1 h-1 rounded-full bg-sky-500" />
                 <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-sky-700">
-                  Powered by Gemma + Audio Transcription
+                  Powered by Gemini AI Expert
                 </p>
                 <div className="w-1 h-1 rounded-full bg-pink-400" />
               </div>

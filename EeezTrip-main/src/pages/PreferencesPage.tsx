@@ -50,6 +50,76 @@ const BUDGET_PRESETS = [
 
 const DAY_OPTIONS = [2, 3, 4, 5, 7, 10, 14];
 
+// ─── Destination Budget Recommendation Database ─────────────────────────────
+
+const isInternationalDestination = (dest: string): boolean => {
+  const destLower = dest.toLowerCase();
+  if (destLower.includes('india')) return false;
+  const indianKeywords = [
+    'goa', 'kerala', 'manali', 'shimla', 'mumbai', 'delhi', 'bangalore', 'jaipur', 
+    'udaipur', 'ladakh', 'hampi', 'pondicherry', 'agra', 'varanasi', 'darjeeling',
+    'gangtok', 'sikkim', 'ooty', 'kodaikanal', 'munnar', 'alleppey', 'kochi', 'coorg',
+    'mysore', 'pune', 'hyderabad', 'chennai', 'kolkata', 'rishikesh', 'amritsar'
+  ];
+  return !indianKeywords.some(keyword => destLower.includes(keyword));
+};
+
+const getMinBudgetForDestination = (dest: string): { amount: number; reason: string } => {
+  const destLower = dest.toLowerCase().trim();
+  
+  if (destLower.includes('santorini')) return { amount: 140000, reason: 'high international flights, premium caldera stay, and scenic dining' };
+  if (destLower.includes('swiss alps') || destLower.includes('switzerland')) return { amount: 150000, reason: 'expensive mountain transport, resort lodging, and dining' };
+  if (destLower.includes('maldives')) return { amount: 120000, reason: 'speedboat transfers, luxury beach villas, and private dining' };
+  if (destLower.includes('paris')) return { amount: 130000, reason: 'long-haul flights, premium hotels in core districts, and landmarks' };
+  if (destLower.includes('amalfi')) return { amount: 140000, reason: 'cliffside lodging, regional transit, and private boat tours' };
+  if (destLower.includes('tokyo') || destLower.includes('kyoto') || destLower.includes('japan')) return { amount: 110000, reason: 'international flight costs, bullet trains, and central stays' };
+  if (destLower.includes('cape town')) return { amount: 100000, reason: 'flights and premium coastal experiences' };
+  if (destLower.includes('bali')) return { amount: 60000, reason: 'flights, tropical pool villas, and local driver hire' };
+  
+  if (destLower.includes('thailand') || destLower.includes('bangkok') || destLower.includes('phuket')) return { amount: 45000, reason: 'flights, island transfers, and hotel suites' };
+  if (destLower.includes('singapore')) return { amount: 75000, reason: 'high city accommodation, garden entries, and flights' };
+  if (destLower.includes('dubai')) return { amount: 70000, reason: 'flights, desert excursions, and city dining' };
+  if (destLower.includes('vietnam') || destLower.includes('hanoi')) return { amount: 40000, reason: 'flights, boutique standard hotels, and regional transfers' };
+  
+  if (destLower.includes('goa')) return { amount: 20000, reason: 'resort lodging, local scooter hire, and beach side dining' };
+  if (destLower.includes('kerala') || destLower.includes('munnar') || destLower.includes('alleppey')) return { amount: 25000, reason: 'houseboat cruise experience, transport, and hill resorts' };
+  if (destLower.includes('manali') || destLower.includes('shimla')) return { amount: 20000, reason: 'mountain transit, snow sports, and central valley hotels' };
+  if (destLower.includes('ladakh') || destLower.includes('leh')) return { amount: 35000, reason: 'flights, inner-line permit, high-altitude stays, and local cabs' };
+  if (destLower.includes('udaipur') || destLower.includes('jaipur')) return { amount: 20000, reason: 'historic heritage stays, royal fort entries, and dining' };
+  if (destLower.includes('hampi')) return { amount: 12000, reason: 'budget guest houses, ruins sightseeing, and auto-rickshaw hire' };
+  if (destLower.includes('pondicherry')) return { amount: 15000, reason: 'French villa boutique stays, cafe meals, and local transit' };
+  
+  if (isInternationalDestination(destLower)) {
+    return { amount: 75000, reason: 'international flight fares, boutique lodging, and general visa/transit fees' };
+  } else {
+    return { amount: 20000, reason: 'standard domestic transport, hotel lodging, and sightseeing' };
+  }
+};
+
+const getAlternativeSuggestions = (budget: number, isIntl: boolean): { name: string; minBudget: number; image: string }[] => {
+  const allDestinations = [
+    { name: 'Hampi, India', minBudget: 12000, isIntl: false, image: 'https://images.unsplash.com/photo-1600100397608-f010b423b971?q=80&w=150' },
+    { name: 'Pondicherry, India', minBudget: 15000, isIntl: false, image: 'https://images.unsplash.com/photo-1590050752117-238cb0fb12b1?q=80&w=150' },
+    { name: 'Goa, India', minBudget: 20000, isIntl: false, image: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=150' },
+    { name: 'Manali, India', minBudget: 20000, isIntl: false, image: 'https://images.unsplash.com/photo-1626621341515-bdf5f8998e6b?q=80&w=150' },
+    { name: 'Udaipur, India', minBudget: 20000, isIntl: false, image: 'https://images.unsplash.com/photo-1597655601841-214a4cfe8b2c?q=80&w=150' },
+    { name: 'Kerala, India', minBudget: 25000, isIntl: false, image: 'https://images.unsplash.com/photo-1593693397690-362cb9666fc2?q=80&w=150' },
+    { name: 'Ladakh, India', minBudget: 35000, isIntl: false, image: 'https://images.unsplash.com/photo-1581793745862-99fde7fa73d2?q=80&w=150' },
+    { name: 'Vietnam', minBudget: 40000, isIntl: true, image: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?q=80&w=150' },
+    { name: 'Thailand', minBudget: 45000, isIntl: true, image: 'https://images.unsplash.com/photo-1528181304800-2f5337a99442?q=80&w=150' },
+    { name: 'Bali, Indonesia', minBudget: 60000, isIntl: true, image: 'https://images.unsplash.com/photo-1537996194471-e657df975ab4?q=80&w=150' },
+    { name: 'Dubai, UAE', minBudget: 70000, isIntl: true, image: 'https://images.unsplash.com/photo-1512453979798-5ea266f8880c?q=80&w=150' },
+    { name: 'Singapore', minBudget: 75000, isIntl: true, image: 'https://images.unsplash.com/photo-1525625293386-3fb8575b4288?q=80&w=150' },
+    { name: 'Cape Town, South Africa', minBudget: 100000, isIntl: true, image: 'https://images.unsplash.com/photo-1580060839134-75a5edca2e99?q=80&w=150' },
+    { name: 'Tokyo, Japan', minBudget: 110000, isIntl: true, image: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?q=80&w=150' },
+  ];
+
+  return allDestinations
+    .filter(d => d.minBudget <= budget)
+    .sort((a, b) => b.minBudget - a.minBudget)
+    .slice(0, 3);
+};
+
 export default function PreferencesPage() {
   const { state, dispatch, navigate, submitTrip } = useTripStore();
   const prefs = state.preferences;
@@ -75,6 +145,12 @@ export default function PreferencesPage() {
   };
 
   const selectedMood = MOODS.find(m => m.id === prefs.mood) || MOODS[0];
+  
+  const destination = prefs.destination || '';
+  const minBudgetInfo = destination ? getMinBudgetForDestination(destination) : { amount: 20000, reason: '' };
+  const isBelowMin = prefs.budget < minBudgetInfo.amount;
+  const isIntl = destination ? isInternationalDestination(destination) : false;
+  const alternatives = isBelowMin ? getAlternativeSuggestions(prefs.budget, isIntl) : [];
 
   return (
     <div style={{ minHeight: '100vh', position: 'relative' }}>
@@ -202,6 +278,51 @@ export default function PreferencesPage() {
 
           {/* ── Budget ─────────────────────────────────────────────── */}
           <div className="glass anim-fade-up delay-200" style={{ padding: '32px', marginBottom: 24, boxShadow: '0 8px 30px rgba(12, 27, 51, 0.04)' }}>
+            
+            {/* Premium Minimum Budget Proactive Notification */}
+            {destination && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '16px 20px', borderRadius: 16,
+                background: isBelowMin ? 'rgba(239, 68, 68, 0.05)' : 'rgba(34, 197, 94, 0.05)',
+                border: `1px solid ${isBelowMin ? 'rgba(239, 68, 68, 0.15)' : 'rgba(34, 197, 94, 0.15)'}`,
+                marginBottom: 24,
+                animation: 'fade-in 0.3s ease-out'
+              }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 36, height: 36, borderRadius: '50%',
+                  background: isBelowMin ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                  color: isBelowMin ? '#ef4444' : '#22c55e',
+                  flexShrink: 0
+                }}>
+                  {isBelowMin ? (
+                    <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  ) : (
+                    <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
+                </div>
+                <div>
+                  <div style={{
+                    fontFamily: 'Outfit, sans-serif', fontWeight: 800,
+                    fontSize: '0.95rem', color: isBelowMin ? '#991b1b' : '#166534'
+                  }}>
+                    {isBelowMin 
+                      ? `Selected Budget is below the minimum recommended (₹${minBudgetInfo.amount.toLocaleString('en-IN')})`
+                      : `Your budget meets the recommended minimum for ${destination}`
+                    }
+                  </div>
+                  <div style={{ color: isBelowMin ? '#b91c1c' : '#15803d', fontSize: '0.82rem', marginTop: 2 }}>
+                    {minBudgetInfo.reason ? `Minimum recommended budget covers ${minBudgetInfo.reason}.` : ''}
+                  </div>
+                </div>
+              </div>
+            )}
+            
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16, marginBottom: 28 }}>
               <div>
                 <h2 style={{
@@ -289,6 +410,100 @@ export default function PreferencesPage() {
                 </button>
               ))}
             </div>
+            
+            {/* Proactive Beautiful Alternative Suggestion Panel */}
+            {isBelowMin && alternatives.length > 0 && (
+              <div className="anim-fade-up" style={{
+                marginTop: 28,
+                padding: '24px',
+                background: 'linear-gradient(135deg, #fafafa 0%, #f4f6f8 100%)',
+                borderRadius: '24px',
+                border: '1px solid rgba(14,165,233,0.12)',
+                boxShadow: '0 4px 20px rgba(14,165,233,0.02)'
+              }}>
+                <h3 style={{
+                  fontFamily: 'Outfit, sans-serif',
+                  fontWeight: 800,
+                  fontSize: '1.02rem',
+                  color: '#0c1b33',
+                  marginBottom: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}>
+                  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" style={{ color: '#0ea5e9' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                  </svg>
+                  Alternative trips that fit your ₹{prefs.budget.toLocaleString('en-IN')} budget:
+                </h3>
+                <p style={{ color: '#5b8bad', fontSize: '0.85rem', marginBottom: 16 }}>
+                  Click a destination below to swap and plan instantly within your budget!
+                </p>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: 14
+                }}>
+                  {alternatives.map(alt => (
+                    <button
+                      key={alt.name}
+                      type="button"
+                      onClick={() => {
+                        dispatch({ type: 'SET_DESTINATION', destination: alt.name });
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '10px',
+                        background: '#fff',
+                        border: '1px solid rgba(0,0,0,0.06)',
+                        borderRadius: '16px',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.02)'
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.05)';
+                        e.currentTarget.style.borderColor = '#0ea5e9';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.transform = '';
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.02)';
+                        e.currentTarget.style.borderColor = 'rgba(0,0,0,0.06)';
+                      }}
+                    >
+                      <div style={{
+                        width: 44, height: 44, borderRadius: '10px',
+                        overflow: 'hidden', flexShrink: 0
+                      }}>
+                        <img src={alt.image} alt={alt.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </div>
+                      <div>
+                        <div style={{
+                          fontFamily: 'Outfit, sans-serif',
+                          fontWeight: 800,
+                          fontSize: '0.9rem',
+                          color: '#0c1b33'
+                        }}>
+                          {alt.name.split(',')[0]}
+                        </div>
+                        <div style={{
+                          color: '#0ea5e9',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          marginTop: 2
+                        }}>
+                          From ₹{alt.minBudget.toLocaleString('en-IN')}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── Duration ───────────────────────────────────────────── */}
@@ -404,7 +619,7 @@ export default function PreferencesPage() {
           </div>
 
           {/* Error */}
-          {state.error && (
+          {state.error && ( 
             <div style={{
               marginBottom: 24, padding: '16px 20px',
               background: 'rgba(254,226,226,0.9)', border: '1px solid #f87171',

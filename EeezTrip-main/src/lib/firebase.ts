@@ -1,5 +1,13 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signOut, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword,
+  onAuthStateChanged as fbOnAuthStateChanged
+} from 'firebase/auth';
 import { getFirestore, collection, addDoc, query, where, getDocs, orderBy, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -13,10 +21,89 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
+let app;
+let db: any;
+let auth: any;
+const googleProvider = new GoogleAuthProvider();
+
+const isPlaceholder = (key?: string) => !key || key.startsWith('your_') || key === 'undefined';
+
+try {
+  if (isPlaceholder(firebaseConfig.apiKey)) {
+    throw new Error('Firebase API Key is missing or is a placeholder');
+  }
+  app = initializeApp(firebaseConfig);
+  db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  auth = getAuth(app);
+} catch (e) {
+  console.warn('Firebase initialization failed. Auth and Database features will be disabled.', e);
+  // Mock Firebase objects to prevent crashes
+  app = {};
+  db = { 
+    collection: () => ({ addDoc: () => Promise.resolve() }),
+    firestoreDatabaseId: 'mock'
+  };
+  auth = {
+    onAuthStateChanged: (cb: any) => {
+      // Simulate a signed-in mock user for testing if needed, or keep it null
+      cb({
+        uid: 'mock-user-123',
+        displayName: 'Demo Traveler',
+        email: 'demo@eeeztrip.ai',
+        photoURL: 'https://ui-avatars.com/api/?name=Demo+Traveler'
+      });
+      return () => {};
+    },
+    currentUser: {
+      uid: 'mock-user-123',
+      displayName: 'Demo Traveler',
+      email: 'demo@eeeztrip.ai'
+    },
+    signOut: () => Promise.resolve(),
+  };
+}
+
+export { app, db, auth, googleProvider, signInWithEmailAndPassword, createUserWithEmailAndPassword };
+
+export const onAuthStateChanged = (authInstance: any, cb: any) => {
+  if (authInstance && typeof authInstance.onAuthStateChanged === 'function') {
+    return authInstance.onAuthStateChanged(cb);
+  }
+  // Mock behavior
+  cb(null);
+  return () => {};
+};
+
+export const signInWithPopupMock = async (authInstance: any, provider: any) => {
+  if (authInstance && authInstance.app && authInstance.app.options) {
+    return signInWithPopup(authInstance, provider);
+  }
+  alert("Authentication is disabled because Firebase keys are missing.");
+  return null;
+};
+
+export const signInWithEmailMock = async (authInstance: any, email: string, pass: string) => {
+  if (authInstance && authInstance.app && authInstance.app.options) {
+    return signInWithEmailAndPassword(authInstance, email, pass);
+  }
+  alert("Email Sign-in is disabled because Firebase keys are missing.");
+  return null;
+};
+
+export const signUpWithEmailMock = async (authInstance: any, email: string, pass: string) => {
+  if (authInstance && authInstance.app && authInstance.app.options) {
+    return createUserWithEmailAndPassword(authInstance, email, pass);
+  }
+  alert("Email Sign-up is disabled because Firebase keys are missing.");
+  return null;
+};
+
+export const signOutMock = async (authInstance: any) => {
+  if (authInstance && typeof authInstance.signOut === 'function') {
+    return authInstance.signOut();
+  }
+  return Promise.resolve();
+};
 
 export { 
   collection, 
@@ -27,8 +114,6 @@ export {
   orderBy, 
   serverTimestamp, 
   Timestamp,
-  signInWithPopup,
-  signOut
 };
 
 export enum OperationType {

@@ -1,8 +1,9 @@
 import { useTripStore } from '../state/tripStore';
 import { Page } from '../types';
 import { useState } from 'react';
-import { signInWithPopup, googleProvider, auth, signOut } from '../lib/firebase';
-import { motion, AnimatePresence } from 'framer-motion';
+import { signInWithPopupMock as signInWithPopup, googleProvider, auth, signOutMock as signOut } from '../lib/firebase';
+import { motion, AnimatePresence } from 'motion/react';
+import { AuthModal } from './AuthModal';
 
 const BASE_LINKS: { page: Page; label: string }[] = [
   { page: 'landing', label: 'Home' },
@@ -18,6 +19,8 @@ const PAGE_PROGRESS: Record<Page, number> = {
   preferences: 50,
   results: 75,
   booking: 100,
+  reviews: 0,
+  dashboard: 0,
 };
 
 const PLANE_SVG = (
@@ -29,14 +32,11 @@ const PLANE_SVG = (
 export default function Navbar() {
   const { state, navigate } = useTripStore();
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const progress = PAGE_PROGRESS[state.page];
 
-  const handleSignIn = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (e) {
-      console.error("Login failed", e);
-    }
+  const handleSignIn = () => {
+    setAuthModalOpen(true);
   };
 
   const handleSignOut = async () => {
@@ -253,6 +253,10 @@ export default function Navbar() {
           }} />
         </div>
       )}
+      <AuthModal 
+        isOpen={authModalOpen} 
+        onClose={() => setAuthModalOpen(false)} 
+      />
     </header>
   );
 }

@@ -71,9 +71,86 @@ async def lifespan(application: FastAPI):
         print("[MongoDB] Connection closed.")
 
 
+_MOCK_DB_STORE = {
+    "trips": [],
+    "bookings": [],
+    "group_sync": [],
+    "reviews": []
+}
+
 def get_db():
     if _mongo_db is None:
-        raise HTTPException(status_code=503, detail="MongoDB is not connected. Check MONGODB_URI in .env.")
+        # For local development/demo without MongoDB Atlas
+        print("[WARN] Using In-Memory Fallback Mock DB for local development.")
+        class MockCollection:
+            def __init__(self, name: str):
+                self.name = name
+            async def insert_one(self, doc):
+                from bson import ObjectId
+                if "_id" not in doc:
+                    doc["_id"] = ObjectId()
+                _MOCK_DB_STORE[self.name].append(doc)
+                class Result:
+                    inserted_id = doc["_id"]
+                return Result()
+            async def find_one(self, query):
+                for item in _MOCK_DB_STORE[self.name]:
+                    match = True
+                    for k, v in query.items():
+                        if item.get(k) != v:
+                            match = False
+                            break
+                    if match:
+                        return item
+                return None
+            def find(self, query=None):
+                if query is None:
+                    query = {}
+                matched = []
+                for item in _MOCK_DB_STORE[self.name]:
+                    match = True
+                    for k, v in query.items():
+                        if item.get(k) != v:
+                            match = False
+                            break
+                    if match:
+                        matched.append(item)
+                class Cursor:
+                    def __init__(self, items):
+                        self.items = items
+                    def sort(self, key, direction=-1):
+                        try:
+                            self.items.sort(key=lambda x: x.get(key, ""), reverse=(direction == -1))
+                        except Exception:
+                            pass
+                        return self
+                    def limit(self, count):
+                        self.items = self.items[:count]
+                        return self
+                    async def __aiter__(self):
+                        for i in self.items:
+                            yield i
+                return Cursor(matched)
+            async def update_one(self, *args, **kwargs): return None
+            async def delete_one(self, query, **kwargs):
+                for idx, item in enumerate(_MOCK_DB_STORE[self.name]):
+                    match = True
+                    for k, v in query.items():
+                        if item.get(k) != v:
+                            match = False
+                            break
+                    if match:
+                        _MOCK_DB_STORE[self.name].pop(idx)
+                        break
+                class Result: deleted_count = 1
+                return Result()
+        class MockDB:
+            def __init__(self):
+                self.trips = MockCollection("trips")
+                self.bookings = MockCollection("bookings")
+                self.group_sync = MockCollection("group_sync")
+                self.reviews = MockCollection("reviews")
+        return MockDB()
     return _mongo_db
 
 
@@ -81,6 +158,7 @@ def _id_to_str(doc: dict) -> dict:
     """Convert ObjectId _id to string for JSON serialisation."""
     if doc and "_id" in doc:
         doc["_id"] = str(doc["_id"])
+        doc["id"] = doc["_id"]
     return doc
 
 app = FastAPI(title="EeezTrip API", version="2.0.0", lifespan=lifespan)
@@ -146,12 +224,23 @@ class DayPlan(BaseModel):
     tip: str
 
 
+class BudgetItem(BaseModel):
+    item: str
+    source: str
+    calculation: str
+    cost: int
+    currency: str
+    type: str # 'fixed' or 'variable'
+    notes: Optional[str] = None
+
 class CostBreakdown(BaseModel):
-    accommodation: int
-    food: int
-    transport: int
-    activities: int
-    misc: int
+    accommodation: List[BudgetItem]
+    food: List[BudgetItem]
+    transport: List[BudgetItem]
+    activities: List[BudgetItem]
+    other: List[BudgetItem]
+    total: int
+    confidence: str = "Medium"
 
 
 class TripResponse(BaseModel):
@@ -186,6 +275,21 @@ class WeatherResponse(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+
+
+class MoodRequest(BaseModel):
+    mood: str
+    budget: int
+    currency: str = "INR"
+
+
+class MoodRecommendation(BaseModel):
+    name: str
+    description: str
+    whyMatch: str
+    estimatedCost: int
+    landscapeType: str
+    highlight: str
 
 
 class TranscriptionResponse(BaseModel):
@@ -645,7 +749,7 @@ def gemini_generate_trip(req: TripRequest) -> TripResponse:
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY not configured for fallback.")
     
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
     date_context = f"from {req.start_date} to {req.end_date}" if req.start_date and req.end_date else ""
     
     prompt = f"""You are an expert luxury travel planner. Create a {req.days}-day trip {date_context}.
@@ -676,16 +780,42 @@ Return a valid JSON object matching this schema exactly:
   "cozy_tips": ["string", "string", "string"],
   "must_try_food": ["string", "string", "string"],
   "estimated_cost_breakdown": {{
-    "accommodation": integer,
-    "food": integer,
-    "transport": integer,
-    "activities": integer,
-    "misc": integer
+    "accommodation": [
+      {{ "item": "string", "source": "string", "calculation": "string", "cost": integer, "currency": "INR", "type": "fixed", "notes": "string" }}
+    ],
+    "food": [
+      {{ "item": "string", "source": "string", "calculation": "string", "cost": integer, "currency": "INR", "type": "variable" }}
+    ],
+    "transport": [
+      {{ "item": "string", "source": "string", "calculation": "string", "cost": integer, "currency": "INR", "type": "fixed" }}
+    ],
+    "activities": [
+      {{ "item": "string", "source": "string", "calculation": "string", "cost": integer, "currency": "INR", "type": "fixed" }}
+    ],
+    "other": [
+      {{ "item": "string", "source": "string", "calculation": "string", "cost": integer, "currency": "INR", "type": "fixed" }}
+    ],
+    "total": integer,
+    "confidence": "High/Medium/Low"
   }}
 }}
+[BUDGET_GUIDELINES]:
+1. Act as a Smart Budget Analyzer Engine. Never return 0 or random values.
+2. Base calculations on these multipliers:
+   - Accommodation: Budget (₹500-1500), Standard (₹1500-4000), Luxury (₹4000-15000+) per night.
+   - Food: Budget (₹300-600), Standard (₹700-1500), Luxury (₹2000-5000) per person/day.
+3. Formulas:
+   - Accommodation = price_per_night × nights.
+   - Food = daily_food_cost × guests × days.
+   - Transportation = (Origin to Destination cost) + local transport.
+   - Activities = Estimate based on destination and interests.
+   - Other = 10% of subtotal.
+4. Validation: If a calculation fails, use fallback percentages: Acc (35%), Food (20%), Trans (25%), Act (10%), Other (10%).
+5. Ensure the grand total matches the requested budget if possible, but prioritize realistic destination pricing.
+6. Include a "confidence" score (High/Medium/Low) in the JSON.
+
 Rules:
 1. JSON ONLY, no markdown.
-2. cost_breakdown must sum to {req.budget}.
 """
     response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
     data = json.loads(response.text)
@@ -696,7 +826,7 @@ def gemini_chat(messages: List[ChatMessage]) -> str:
     if not GEMINI_API_KEY:
         return "I'm sorry, I'm having trouble connecting to my AI services right now."
     
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
     
     # Simple conversion of messages to Gemini format
     system_instruction = "You are EeezTrip's travel assistant. Keep answers concise, practical, and friendly."
@@ -743,13 +873,40 @@ You MUST respond with a valid JSON object matching this schema perfectly:
   "cozy_tips": ["string (Practical travel details)", "string", "string"],
   "must_try_food": ["string (Local delicacies with brief description)", "string", "string"],
   "estimated_cost_breakdown": {{
-    "accommodation": integer,
-    "food": integer,
-    "transport": integer,
-    "activities": integer,
-    "misc": integer
+    "accommodation": [
+      {{ "item": "string", "source": "string", "calculation": "string", "cost": integer, "currency": "INR", "type": "fixed", "notes": "string" }}
+    ],
+    "food": [
+      {{ "item": "string", "source": "string", "calculation": "string", "cost": integer, "currency": "INR", "type": "variable" }}
+    ],
+    "transport": [
+      {{ "item": "string", "source": "string", "calculation": "string", "cost": integer, "currency": "INR", "type": "fixed" }}
+    ],
+    "activities": [
+      {{ "item": "string", "source": "string", "calculation": "string", "cost": integer, "currency": "INR", "type": "fixed" }}
+    ],
+    "other": [
+      {{ "item": "string", "source": "string", "calculation": "string", "cost": integer, "currency": "INR", "type": "fixed" }}
+    ],
+    "total": integer,
+    "confidence": "High/Medium/Low"
   }}
 }}
+
+[BUDGET_GUIDELINES]:
+1. Act as a Smart Budget Analyzer Engine. Never return 0 or random values.
+2. Base calculations on these multipliers:
+   - Accommodation: Budget (₹500-1500), Standard (₹1500-4000), Luxury (₹4000-15000+) per night.
+   - Food: Budget (₹300-600), Standard (₹700-1500), Luxury (₹2000-5000) per person/day.
+3. Formulas:
+   - Accommodation = price_per_night × nights.
+   - Food = daily_food_cost × guests × days.
+   - Transportation = (Origin to Destination cost) + local transport.
+   - Activities = Estimate based on destination and interests.
+   - Other = 10% of subtotal.
+4. Validation: If a calculation fails, use fallback percentages: Acc (35%), Food (20%), Trans (25%), Act (10%), Other (10%).
+5. Ensure the grand total matches the requested budget if possible, but prioritize realistic destination pricing.
+6. Include a "confidence" score (High/Medium/Low) in the JSON.
 
 Important Planning Rules:
 1. SPECIFICITY: Use actual place names, landmarks, and restaurants. No generic descriptions.
@@ -758,7 +915,6 @@ Important Planning Rules:
 4. VARIETY: Mix popular highlights with genuine local gems. Balance active exploration with rest.
 5. PRACTICALITY: Mention estimated durations, travel times, and advance booking needs where relevant.
 6. FORMAT: ONLY return the JSON object, no extra text or markdown code blocks.
-7. BUDGET: Values in estimated_cost_breakdown MUST sum to exactly {req.budget} (integers).
 """
     try:
         model = resolve_ollama_model(LOCAL_OLLAMA_MODEL)
@@ -895,20 +1051,42 @@ def build_fast_trip(req: TripRequest) -> TripResponse:
 
 
 def _generate_mock_price_and_rating(origin: str, destination: str, mode: str) -> tuple[int, float]:
+    # Simplified realistic pricing based on destination types
+    dest = destination.lower()
+    org = origin.lower()
+    
+    # Check if international
+    is_intl = any(x in dest for x in ["bali", "paris", "tokyo", "dubai", "london", "new york", "maldives", "singapore", "thailand", "vietnam", "usa", "europe", "japan"])
+    is_domestic = any(x in dest for x in ["goa", "kerala", "manali", "shimla", "mumbai", "delhi", "bangalore", "jaipur", "udaipur", "ladakh", "hampi", "pondicherry"])
+    
+    # Basic seed for consistency
     base = sum(ord(c) for c in (origin + destination + mode).lower())
-    rating = round(3.5 + ((base % 15) / 10.0), 1)
+    rating = round(4.0 + ((base % 10) / 10.0), 1) # Generally higher ratings for curated lists
+    
     if "flight" in mode.lower():
-        return 15000 + (base % 20000), rating
-    elif "hotel" in mode.lower():
-        return 3000 + (base % 8000), rating
-    elif "train" in mode.lower():
-        return 2000 + (base % 3000), rating
-    elif "bus" in mode.lower():
-        return 1000 + (base % 2000), rating
-    elif "cab" in mode.lower():
+        if is_intl:
+            if "new york" in dest or "usa" in dest: return 85000 + (base % 40000), rating
+            if "london" in dest or "paris" in dest or "europe" in dest: return 55000 + (base % 30000), rating
+            if "tokyo" in dest or "japan" in dest: return 45000 + (base % 20000), rating
+            return 25000 + (base % 15000), rating # Bali, Dubai, SE Asia
         return 5000 + (base % 10000), rating
-    else:
-        return 4000 + (base % 5000), rating
+    
+    if "hotel" in mode.lower():
+        if is_intl:
+            if "new york" in dest or "london" in dest or "paris" in dest: return 12000 + (base % 15000), rating
+            return 5000 + (base % 10000), rating
+        return 2500 + (base % 5000), rating
+        
+    if "train" in mode.lower():
+        return 1200 + (base % 3000), rating
+    
+    if "bus" in mode.lower():
+        return 600 + (base % 1500), rating
+        
+    if "cab" in mode.lower():
+        return 3000 + (base % 5000), rating
+        
+    return 2000 + (base % 3000), rating
 
 def scrape_transport_price(origin: str, destination: str, mode: str) -> TransportOption:
     api_key = os.getenv("SERPAPI_API_KEY", "").strip()
@@ -1086,56 +1264,65 @@ Rules:
 @app.post("/api/recommend", response_model=TripResponse)
 def recommend_trip(req: TripRequest):
     trip = None
-    if req.mode == "deep":
-        # Orchestration logic: Try Ollama first, fallback to Gemini
-        if is_ollama_available():
-            try:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(ollama_generate_trip, req)
-                    trip = future.result(timeout=DEEP_MODE_TIMEOUT_SEC)
-            except Exception as e:
-                print(f"Ollama deep generation failed, falling back to Gemini: {e}")
-                if GEMINI_API_KEY:
-                    try:
-                        trip = gemini_generate_trip(req)
-                    except Exception as ge:
-                        print(f"Gemini fallback failed: {ge}")
+    try:
+        if req.mode == "deep":
+            # Orchestration logic: Try Ollama first, fallback to Gemini
+            if is_ollama_available():
+                try:
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(ollama_generate_trip, req)
+                        trip = future.result(timeout=DEEP_MODE_TIMEOUT_SEC)
+                except Exception as e:
+                    print(f"Ollama deep generation failed, falling back to Gemini: {e}")
+                    if GEMINI_API_KEY:
+                        try:
+                            trip = gemini_generate_trip(req)
+                        except Exception as ge:
+                            print(f"Gemini fallback failed: {ge}")
+                            trip = build_fast_trip(req)
+                    else:
                         trip = build_fast_trip(req)
-                else:
+            elif GEMINI_API_KEY:
+                print("Ollama unavailable, using Gemini for deep mode.")
+                try:
+                    trip = gemini_generate_trip(req)
+                except Exception as e:
+                    print(f"Gemini generation failed: {e}")
                     trip = build_fast_trip(req)
-        elif GEMINI_API_KEY:
-            print("Ollama unavailable, using Gemini for deep mode.")
-            try:
-                trip = gemini_generate_trip(req)
-            except Exception as e:
-                print(f"Gemini generation failed: {e}")
+            else:
+                print("No AI services available, using template generator.")
                 trip = build_fast_trip(req)
         else:
-            print("No AI services available, using template generator.")
             trip = build_fast_trip(req)
-    else:
-        trip = build_fast_trip(req)
 
-    # Sync the final estimated cost breakdown with real live pricing from SerpApi
-    try:
-        final_dest = trip.destination or req.destination
-        if final_dest:
-            hotel_opts = get_hotel_prices(final_dest)
-            valid_hotels = [h.price_inr for h in hotel_opts if h.price_inr]
-            if valid_hotels:
-                avg_hotel = sum(valid_hotels) / len(valid_hotels)
-                trip.estimated_cost_breakdown.accommodation = int(avg_hotel * req.days)
-                
-        if req.origin and final_dest:
-            transport_opts = get_transport_prices(req.origin, final_dest)
-            valid_transports = [t.price_inr for t in transport_opts if t.price_inr]
-            if valid_transports:
-                avg_transport = sum(valid_transports) / len(valid_transports)
-                trip.estimated_cost_breakdown.transport = int(avg_transport * 2)
+        # Sync the final estimated cost breakdown with real live pricing from SerpApi
+        try:
+            final_dest = trip.destination or req.destination
+            if final_dest:
+                hotel_opts = get_hotel_prices(final_dest)
+                valid_hotels = [h.price_inr for h in hotel_opts if h.price_inr]
+                if valid_hotels:
+                    avg_hotel = sum(valid_hotels) / len(valid_hotels)
+                    trip.estimated_cost_breakdown.accommodation = int(avg_hotel * req.days)
+                    
+            if req.origin and final_dest:
+                transport_opts = get_transport_prices(req.origin, final_dest)
+                valid_transports = [t.price_inr for t in transport_opts if t.price_inr]
+                if valid_transports:
+                    avg_transport = sum(valid_transports) / len(valid_transports)
+                    trip.estimated_cost_breakdown.transport = int(avg_transport * 2)
+        except Exception as e:
+            print(f"Failed to sync live prices to budget: {e}")
+
+        return trip
     except Exception as e:
-        print(f"Failed to sync live prices to budget: {e}")
-
-    return trip
+        print(f"Critical error in recommend_trip: {e}")
+        # Final emergency fallback to ensured template generator
+        try:
+            return build_fast_trip(req)
+        except Exception as fe:
+            print(f"Emergency fallback also failed: {fe}")
+            raise HTTPException(status_code=500, detail="Internal server error while generating trip.")
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -1152,9 +1339,42 @@ def chat(req: ChatRequest):
     elif GEMINI_API_KEY:
         reply = gemini_chat(req.messages)
     else:
-        reply = "I'm currently in offline mode. I can help with basic navigation, but full AI chat is unavailable."
+        # Improved online mode logic: Even without API keys, we can provide a helpful response
+        reply = "I am currently in standard mode. I can help with basic navigation and itineraries, but advanced conversational features require an active AI API key. Feel free to explore our pre-planned destinations!"
         
     return ChatResponse(reply=reply)
+
+
+@app.post("/api/mood", response_model=List[MoodRecommendation])
+def get_mood_recommendations(req: MoodRequest):
+    """Suggest destinations based on mood using AI."""
+    prompt = f"""The user is feeling '{req.mood}' and has a budget of {req.budget} {req.currency}.
+Suggest 3 diverse destinations (1 domestic, 2 international) that match this mood and fit this budget.
+Return ONLY a JSON array of objects with: name, description (max 100 chars), whyMatch, estimatedCost (number), landscapeType, highlight (one wow factor)."""
+
+    try:
+        if is_ollama_available():
+            response = ollama.chat(
+                model=LOCAL_OLLAMA_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                format="json"
+            )
+            data = json.loads(response["message"]["content"])
+            return data
+        elif GEMINI_API_KEY:
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+            return json.loads(response.text)
+        else:
+            # Fallback data if no AI is available
+            return [
+                {"name": "Bali, Indonesia", "description": "Tropical paradise", "whyMatch": "Perfect for a chill vibe", "estimatedCost": int(req.budget * 0.7), "landscapeType": "Beach", "highlight": "Sunset at Tanah Lot"},
+                {"name": "Goa, India", "description": "Beach party capital", "whyMatch": "Great for social vibes", "estimatedCost": int(req.budget * 0.4), "landscapeType": "Coastal", "highlight": "Beach shacks"},
+                {"name": "Paris, France", "description": "City of lights", "whyMatch": "Ultimate romantic escape", "estimatedCost": int(req.budget * 1.2), "landscapeType": "Urban", "highlight": "Eiffel Tower"}
+            ]
+    except Exception as e:
+        print(f"Mood recommendations failed: {e}")
+        return []
 
 
 @app.post("/api/recommend/revise", response_model=TripResponse)
@@ -1450,6 +1670,8 @@ async def get_group_sync(session_id: str):
 
 class ReviewRequest(BaseModel):
     user_id: str = "anonymous"
+    user_name: Optional[str] = "Anonymous Explorer"
+    user_photo: Optional[str] = None
     destination: str
     rating: int
     comment: str
@@ -1461,6 +1683,7 @@ async def create_review(body: ReviewRequest):
     db = get_db()
     doc = {
         **body.model_dump(),
+        "likes": 0,
         "created_at": datetime.datetime.utcnow().isoformat() + "Z",
     }
     result = await db.reviews.insert_one(doc)
@@ -1476,3 +1699,27 @@ async def list_reviews(destination: Optional[str] = None):
     async for doc in cursor:
         reviews.append(_id_to_str(doc))
     return {"reviews": reviews, "count": len(reviews)}
+
+@app.post("/api/reviews/{review_id}/like")
+async def like_review(review_id: str):
+    """Increment the like count for a review."""
+    db = get_db()
+    if hasattr(db, "reviews") and hasattr(db.reviews, "name") and db.reviews.name == "reviews":
+        for item in _MOCK_DB_STORE["reviews"]:
+            item_id = str(item.get("_id"))
+            if item_id == review_id:
+                item["likes"] = item.get("likes", 0) + 1
+                return {"id": review_id, "likes": item["likes"], "message": "Review liked."}
+    else:
+        from bson import ObjectId
+        try:
+            res = await db.reviews.update_one(
+                {"_id": ObjectId(review_id)},
+                {"$inc": {"likes": 1}}
+            )
+            if res.modified_count > 0:
+                doc = await db.reviews.find_one({"_id": ObjectId(review_id)})
+                return {"id": review_id, "likes": doc.get("likes", 0), "message": "Review liked."}
+        except Exception as e:
+            print(f"[Error] Failed to update MongoDB review like count: {e}")
+    return {"id": review_id, "message": "Like registered (fallback)."}

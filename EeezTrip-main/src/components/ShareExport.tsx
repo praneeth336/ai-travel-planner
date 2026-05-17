@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { db, collection, addDoc, serverTimestamp, auth } from '../lib/firebase';
 import { Recommendation, TripPreferences } from '../types';
 import { useTripStore } from '../state/tripStore';
@@ -51,12 +51,13 @@ function injectPrintStyles(rec: Recommendation, prefs: TripPreferences) {
   const existing = document.getElementById('eeeztrip-print-styles');
   if (existing) existing.remove();
 
-  const totalCost =
-    (rec.estimated_cost_breakdown.accommodation || 0) +
-    (rec.estimated_cost_breakdown.food || 0) +
-    (rec.estimated_cost_breakdown.transport || 0) +
-    (rec.estimated_cost_breakdown.activities || 0) +
-    (rec.estimated_cost_breakdown.misc || 0);
+  const sumCat = (items: any) => Array.isArray(items) ? items.reduce((acc: number, i: any) => acc + (i.cost || 0), 0) : 0;
+  const totalCost = rec.estimated_cost_breakdown.total || 
+    (sumCat(rec.estimated_cost_breakdown.accommodation) +
+     sumCat(rec.estimated_cost_breakdown.food) +
+     sumCat(rec.estimated_cost_breakdown.transport) +
+     sumCat(rec.estimated_cost_breakdown.activities) +
+     sumCat(rec.estimated_cost_breakdown.other));
 
   const dailyPlanHtml = rec.daily_plan
     .map(
@@ -118,11 +119,11 @@ function injectPrintStyles(rec: Recommendation, prefs: TripPreferences) {
         <h2 style="font-size:1rem;font-weight:800;color:#0c1b33;margin:0 0 14px;">💰 Estimated Cost Breakdown</h2>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">
           ${[
-            ['🏨 Accommodation', rec.estimated_cost_breakdown.accommodation],
-            ['🍽️ Food & Dining', rec.estimated_cost_breakdown.food],
-            ['🚗 Transport', rec.estimated_cost_breakdown.transport],
-            ['🎯 Activities', rec.estimated_cost_breakdown.activities],
-            ['📦 Misc', rec.estimated_cost_breakdown.misc],
+            ['🏨 Accommodation', sumCat(rec.estimated_cost_breakdown.accommodation)],
+            ['🍽️ Food & Dining', sumCat(rec.estimated_cost_breakdown.food)],
+            ['🚗 Transport', sumCat(rec.estimated_cost_breakdown.transport)],
+            ['🎯 Activities', sumCat(rec.estimated_cost_breakdown.activities)],
+            ['📦 Other', sumCat(rec.estimated_cost_breakdown.other)],
           ].map(([label, val]) => `<div style="background:#fff;border-radius:8px;padding:10px 12px;"><div style="font-size:0.75rem;color:#64748b;">${label}</div><div style="font-weight:700;color:#0f172a;font-size:1rem;">₹${Number(val).toLocaleString('en-IN')}</div></div>`).join('')}
         </div>
         <div style="border-top:1px solid #e2e8f0;padding-top:10px;display:flex;justify-content:space-between;align-items:center;">

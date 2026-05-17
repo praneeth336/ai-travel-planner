@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useTripStore } from '../state/tripStore';
 import { CostBreakdown, DayPlan, PlaceImage } from '../types';
-import { AiConcierge } from '../components/AiConcierge';
 import { ShareExport } from '../components/ShareExport';
 import { WeatherWidget } from '../components/WeatherWidget';
 import { Icons } from '../components/Icons';
 import { MapWidget } from '../components/MapWidget';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { WeatherAdvisory } from '../components/WeatherAdvisory';
+import { BudgetBreakdown } from '../components/BudgetBreakdown';
 
 const MOOD_ALTERNATIVES: Record<string, string[]> = {
   'Relaxed': ['Goa', 'Pondicherry', 'Andaman'],
@@ -189,69 +189,6 @@ function DayCard({ day }: { day: DayPlan }) {
   );
 }
 
-function CostChart({ breakdown, total }: { breakdown: CostBreakdown; total: number }) {
-  const items = [
-    { label: 'Accommodation', value: breakdown.accommodation, color: '#0ea5e9', icon: Icons.acc },
-    { label: 'Food & Dining', value: breakdown.food, color: '#ec4899', icon: Icons.dining },
-    { label: 'Transport', value: breakdown.transport, color: '#8b5cf6', icon: Icons.transport },
-    { label: 'Activities', value: breakdown.activities, color: '#f97316', icon: Icons.activities },
-    { label: 'Misc / Extras', value: breakdown.misc, color: '#22c55e', icon: Icons.misc },
-  ];
-
-  return (
-    <div>
-      <div style={{ display: 'grid', gap: 16 }}>
-        {items.map(item => {
-          const pct = Math.round((item.value / total) * 100);
-          return (
-            <div key={item.label}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: '0.9rem', color: '#1a2f4e',
-                }}>
-                  <span style={{ color: item.color }}>{item.icon}</span>
-                  {item.label}
-                </span>
-                <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, color: item.color, fontSize: '0.95rem' }}>
-                  ₹{item.value.toLocaleString('en-IN')} <span style={{ color: '#a8d4ed', fontWeight: 500 }}>({pct}%)</span>
-                </span>
-              </div>
-              <div style={{ height: 8, borderRadius: 4, background: 'rgba(0,0,0,0.05)', overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%', width: `${pct}%`,
-                  background: `linear-gradient(90deg, ${item.color}, ${item.color}cc)`,
-                  borderRadius: 4,
-                  transition: 'width 1s cubic-bezier(0.4,0,0.2,1)',
-                }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div style={{
-        marginTop: 24, padding: '16px 20px',
-        background: 'linear-gradient(135deg, rgba(14,165,233,0.05), rgba(236,72,153,0.05))',
-        border: '1px solid rgba(56,189,248,0.2)',
-        borderRadius: 14,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      }}>
-        <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 800, color: '#0c1b33', fontSize: '1.05rem' }}>
-          Total Budget
-        </span>
-        <span style={{
-          fontFamily: 'Outfit, sans-serif', fontWeight: 900,
-          fontSize: '1.4rem',
-          background: 'linear-gradient(135deg, #0284c7, #ec4899)',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-        }}>
-          ₹{total.toLocaleString('en-IN')}
-        </span>
-      </div>
-    </div>
-  );
-}
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
@@ -265,6 +202,7 @@ export default function ResultsPage() {
         minHeight: '100vh', display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         background: 'linear-gradient(180deg, #f0f9ff 0%, #fdf2f8 50%, #f0f9ff 100%)',
+        backgroundColor: '#f0f9ff',
       }}>
         <div style={{
           width: 50, height: 50, borderRadius: '50%',
@@ -287,6 +225,8 @@ export default function ResultsPage() {
         minHeight: '100vh', display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         padding: '100px 24px', textAlign: 'center',
+        background: 'linear-gradient(180deg, #fef2f2 0%, #fff 100%)',
+        backgroundColor: '#fef2f2',
       }}>
         <div style={{ color: '#ef4444', marginBottom: 24 }}>
           <svg width="64" height="64" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
@@ -316,7 +256,8 @@ export default function ResultsPage() {
       <div style={{
         minHeight: '100vh', display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
-        padding: '100px 24px', textAlign: 'center',
+        background: 'linear-gradient(180deg, #f0f9ff 0%, #fdf2f8 50%, #f0f9ff 100%)',
+        backgroundColor: '#f0f9ff',
       }}>
         {Icons.mapEmpty}
         <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.8rem', fontWeight: 800, color: '#0c1b33', marginBottom: 12 }}>
@@ -339,20 +280,17 @@ export default function ResultsPage() {
   const cozyTips = Array.isArray(rec.cozy_tips) ? rec.cozy_tips : [];
 
   // Safe access to estimated cost breakdown
-  const breakdown = rec.estimated_cost_breakdown || {
-    accommodation: 0,
-    food: 0,
-    transport: 0,
-    activities: 0,
-    misc: 0
+  const breakdown: CostBreakdown = rec.estimated_cost_breakdown || {
+    accommodation: [],
+    food: [],
+    transport: [],
+    activities: [],
+    other: [],
+    total: 0,
+    confidence: 'Medium'
   };
 
-  const totalCost =
-    breakdown.accommodation +
-    breakdown.food +
-    breakdown.transport +
-    breakdown.activities +
-    breakdown.misc;
+  const totalCost = breakdown.total || 0;
 
   const userBudget = preferences?.budget || 0;
   const currentDest = preferences?.destination || rec.destination || '';
@@ -442,6 +380,17 @@ export default function ResultsPage() {
               <span className="badge badge-ice" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {Icons.checkReady} Trip Ready
               </span>
+              {state.user && (
+                <span className="badge" style={{ 
+                  background: 'rgba(16, 185, 129, 0.1)', 
+                  color: '#059669', 
+                  border: '1px solid rgba(16, 185, 129, 0.2)',
+                  display: 'flex', alignItems: 'center', gap: 6 
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                  Saved to Cloud
+                </span>
+              )}
               <span className="badge badge-pink" style={{ padding: '6px 14px' }}>
                 {preferences?.mood || 'Relaxed'} · {preferences?.days || 4} days
               </span>
@@ -622,15 +571,16 @@ export default function ResultsPage() {
               </div>
 
               {/* Cost breakdown */}
-              <div className="glass anim-fade-up delay-600" style={{ padding: '24px', boxShadow: '0 8px 30px rgba(12, 27, 51, 0.04)' }}>
-                <h3 style={{
-                  fontFamily: 'Outfit, sans-serif', fontWeight: 800,
-                  fontSize: '1.1rem', color: '#0c1b33', marginBottom: 20,
-                  display: 'flex', alignItems: 'center', gap: 8,
-                }}>
-                  <span style={{ color: '#22c55e' }}>{Icons.wallet}</span> Budget Breakdown
-                </h3>
-                <CostChart breakdown={breakdown} total={totalCost} />
+              <div className="anim-fade-up delay-600" style={{ boxShadow: '0 8px 30px rgba(12, 27, 51, 0.04)', gridColumn: '1 / -1' }}>
+                <ErrorBoundary>
+                  <BudgetBreakdown 
+                    budget={breakdown} 
+                    targetBudget={userBudget} 
+                    currency={preferences?.currency || 'INR'} 
+                    days={preferences?.days || 1}
+                    guests={Number(preferences?.guests) || 1}
+                  />
+                </ErrorBoundary>
               </div>
             </div>
           </div>
@@ -674,7 +624,6 @@ export default function ResultsPage() {
           </div>
         </div>
       </div>
-      <AiConcierge />
     </div>
   );
 }

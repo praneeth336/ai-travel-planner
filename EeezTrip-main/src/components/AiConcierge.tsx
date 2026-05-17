@@ -1,170 +1,118 @@
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  Sparkles, 
+  X, 
+  SendHorizontal, 
+  RefreshCcw,
+  MessageCircle,
+  Zap
+} from 'lucide-react';
 import { useTripStore } from '../state/tripStore';
 
-// We use custom inline SVG icons to ensure consistency
-const SparklesIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-  </svg>
-);
-
-const XIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="18" y1="6" x2="6" y2="18" />
-    <line x1="6" y1="6" x2="18" y2="18" />
-  </svg>
-);
-
-const SendIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="22" y1="2" x2="11" y2="13" />
-    <polygon points="22 2 15 22 11 13 2 9 22 2" />
-  </svg>
-);
-
 export function AiConcierge() {
-  const { state, reviseTrip } = useTripStore();
+  const { state, sendChatMessage, reviseTrip } = useTripStore();
   const [isOpen, setIsOpen] = useState(false);
-  const [instruction, setInstruction] = useState('');
+  const [inputValue, setInputValue] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [state.chatHistory, state.chatLoading]);
+
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!instruction.trim() || state.revising) return;
-    reviseTrip(instruction);
-    setInstruction('');
+    if (!inputValue.trim() || state.chatLoading) return;
+    const msg = inputValue;
+    setInputValue('');
+    await sendChatMessage(msg);
+  };
+
+  const handleApplyRevision = () => {
+    const lastMsg = [...state.chatHistory].reverse().find(m => m.role === 'assistant');
+    if (lastMsg) reviseTrip(lastMsg.content);
   };
 
   return (
-    <div style={{ position: 'fixed', bottom: 32, right: 32, zIndex: 9999 }}>
+    <div className="fixed bottom-8 right-8 z-[9999]">
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            transition={{ duration: 0.2 }}
-            style={{
-              position: 'absolute',
-              bottom: 80,
-              right: 0,
-              width: 340,
-              background: '#fff',
-              borderRadius: 24,
-              boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
-              border: '1px solid rgba(0,0,0,0.05)',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            className="absolute bottom-24 right-0 w-[400px] h-[600px] bg-white rounded-[32px] shadow-2xl border border-slate-100 flex flex-col overflow-hidden"
           >
             {/* Header */}
-            <div style={{
-              background: 'linear-gradient(135deg, #0284c7, #ec4899)',
-              padding: '16px 20px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              color: '#fff',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <SparklesIcon />
-                <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '1.1rem' }}>AI Concierge</span>
+            <div className="bg-slate-900 p-6 flex justify-between items-center text-white">
+              <div className="flex items-center gap-3">
+                <div className="bg-gradient-to-br from-cyan-400 to-blue-600 p-2 rounded-xl"><Zap size={18} fill="white" /></div>
+                <div>
+                  <h3 className="font-bold text-sm">Trip Concierge</h3>
+                  <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"/><span className="text-[10px] opacity-70 font-bold uppercase">Online</span></div>
+                </div>
               </div>
-              <button onClick={() => setIsOpen(false)} style={{
-                background: 'rgba(255,255,255,0.2)',
-                border: 'none',
-                borderRadius: '50%',
-                width: 28, height: 28,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#fff', cursor: 'pointer',
-              }}>
-                <XIcon />
-              </button>
+              <button onClick={() => setIsOpen(false)} className="opacity-50 hover:opacity-100 transition-opacity"><X size={20}/></button>
             </div>
 
-            {/* Body */}
-            <div style={{ padding: '20px', background: '#f8fafc', minHeight: 120 }}>
-              {state.revising ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12 }}>
-                  <div style={{
-                    width: 30, height: 30, borderRadius: '50%',
-                    border: '3px solid rgba(236,72,153,0.3)',
-                    borderTopColor: '#ec4899',
-                    animation: 'spin-slow 0.8s linear infinite',
-                  }} />
-                  <span style={{ color: '#0f172a', fontWeight: 600, fontSize: '0.95rem' }}>Rewriting your trip...</span>
-                  <span style={{ color: '#64748b', fontSize: '0.85rem', textAlign: 'center' }}>This magic takes a few seconds.</span>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <span style={{ color: '#334155', fontSize: '0.95rem', lineHeight: 1.5 }}>
-                    Not happy with the current plan? Tell me what to change!
-                  </span>
-                  {state.reviseError && (
-                    <div style={{ padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#dc2626', fontSize: '0.85rem' }}>
-                      {state.reviseError}
-                    </div>
-                  )}
-                  <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                    <input
-                      type="text"
-                      placeholder="e.g., 'Make day 2 kid-friendly'"
-                      value={instruction}
-                      onChange={(e) => setInstruction(e.target.value)}
-                      style={{
-                        flex: 1, padding: '12px 16px', borderRadius: 12,
-                        border: '1px solid #e2e8f0', background: '#fff',
-                        outline: 'none', fontSize: '0.95rem',
-                      }}
-                    />
-                    <button type="submit" disabled={!instruction.trim() || state.revising} style={{
-                      background: instruction.trim() ? '#ec4899' : '#cbd5e1',
-                      color: '#fff', border: 'none', borderRadius: 12,
-                      width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: instruction.trim() ? 'pointer' : 'not-allowed',
-                      transition: 'background 0.2s',
-                    }}>
-                      <SendIcon />
-                    </button>
-                  </form>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-                    {["More food focus", "Less museums", "Cheaper activities"].map(hint => (
-                      <button
-                        key={hint}
-                        type="button"
-                        onClick={() => setInstruction(hint)}
-                        style={{
-                          fontSize: '0.75rem', padding: '4px 10px',
-                          background: '#e2e8f0', color: '#475569',
-                          border: 'none', borderRadius: 999, cursor: 'pointer',
-                        }}
-                      >
-                        {hint}
-                      </button>
-                    ))}
-                  </div>
+            {/* Chat Messages */}
+            <div ref={scrollRef} className="flex-1 p-6 overflow-y-auto bg-slate-50 space-y-4">
+              {state.chatHistory.length === 0 && (
+                <div className="text-center py-10 px-6">
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm text-slate-400"><Sparkles size={24}/></div>
+                  <h4 className="text-slate-900 font-bold text-sm mb-1">How can I help today?</h4>
+                  <p className="text-slate-500 text-xs">Ask me to add more stops, change the budget, or find local food spots.</p>
                 </div>
               )}
+              {state.chatHistory.map((msg, i) => (
+                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-slate-900 text-white rounded-br-none' : 'bg-white text-slate-800 border border-slate-100 rounded-bl-none'}`}>
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+              {state.chatLoading && (
+                <div className="bg-white p-3 rounded-2xl border border-slate-100 w-16 flex justify-center gap-1">
+                  <div className="w-1 h-1 bg-slate-300 rounded-full animate-bounce"/>
+                  <div className="w-1 h-1 bg-slate-300 rounded-full animate-bounce [animation-delay:0.2s]"/>
+                  <div className="w-1 h-1 bg-slate-300 rounded-full animate-bounce [animation-delay:0.4s]"/>
+                </div>
+              )}
+            </div>
+
+            {/* Actions & Input */}
+            <div className="p-6 bg-white border-t border-slate-100">
+              {state.chatHistory.some(m => m.role === 'assistant') && (
+                <button 
+                  onClick={handleApplyRevision}
+                  disabled={state.revising}
+                  className="w-full mb-4 py-3 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                >
+                  {state.revising ? <RefreshCcw size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
+                  Apply AI Suggestions
+                </button>
+              )}
+              <form onSubmit={handleSend} className="flex gap-2">
+                <input 
+                  type="text" value={inputValue} onChange={e => setInputValue(e.target.value)} 
+                  placeholder="Tell me what to change..." 
+                  className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-slate-400 text-sm transition-all"
+                />
+                <button type="submit" disabled={!inputValue.trim() || state.chatLoading} className="w-12 h-12 bg-slate-900 text-white rounded-xl flex items-center justify-center shadow-lg hover:shadow-xl transition-all disabled:opacity-30">
+                  <SendHorizontal size={20} />
+                </button>
+              </form>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
+        whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
         onClick={() => setIsOpen(!isOpen)}
-        style={{
-          width: 64, height: 64, borderRadius: '50%',
-          background: 'linear-gradient(135deg, #0284c7, #ec4899)',
-          border: 'none', color: '#fff',
-          boxShadow: '0 10px 25px rgba(236,72,153,0.3)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', zIndex: 10, position: 'relative'
-        }}
+        className="w-16 h-16 rounded-full bg-slate-900 text-white flex items-center justify-center shadow-2xl"
       >
-        {isOpen ? <XIcon /> : <SparklesIcon />}
+        {isOpen ? <X size={28} /> : <MessageCircle size={28} />}
       </motion.button>
     </div>
   );

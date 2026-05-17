@@ -22,8 +22,9 @@ export default function ParticleBackground() {
       position: 'fixed',
       inset: 0,
       pointerEvents: 'none',
-      zIndex: 0,
+      zIndex: -1,
       overflow: 'hidden',
+      backgroundColor: 'transparent',
     }}>
       {/* Blobs */}
       {orbs.map((orb, i) => (

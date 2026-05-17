@@ -60,15 +60,26 @@ html {
   -webkit-font-smoothing: antialiased;
 }
 
+html {
+  background-color: #f0f9ff;
+  scroll-behavior: smooth;
+}
+
 body {
   font-family: var(--font-body);
   color: var(--deep);
   background: var(--bg);
+  background-color: #f0f9ff; /* Solid fallback */
   min-height: 100vh;
   overflow-x: hidden;
+  margin: 0;
+  padding: 0;
 }
 
-#root { min-height: 100vh; }
+#root { 
+  min-height: 100vh;
+  background-color: #f0f9ff;
+}
 
 /* ── Typography ── */
 h1, h2, h3, h4, h5, h6 {
@@ -79,12 +90,16 @@ h1, h2, h3, h4, h5, h6 {
 
 /* ── Gradient Backgrounds ── */
 .bg-mesh {
+  background-color: #f0f9ff; /* Solid fallback */
   background:
     radial-gradient(ellipse 900px 600px at 10% -5%, rgba(56, 189, 248, 0.22) 0%, transparent 70%),
     radial-gradient(ellipse 700px 500px at 90% 10%, rgba(236, 72, 153, 0.12) 0%, transparent 70%),
     radial-gradient(ellipse 600px 400px at 50% 100%, rgba(56, 189, 248, 0.14) 0%, transparent 70%),
     linear-gradient(180deg, #f0f9ff 0%, #fdf2f8 50%, #f0f9ff 100%);
   min-height: 100vh;
+  width: 100%;
+  position: relative;
+  z-index: 1;
 }
 
 /* ── Glass Card ── */

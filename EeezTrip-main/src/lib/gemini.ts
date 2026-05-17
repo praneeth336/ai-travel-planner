@@ -1,13 +1,147 @@
-import { GoogleGenAI } from "@google/genai";
-import { type TripFormData } from "../types";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { type TripFormData, type TripPreferences, type Recommendation } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY as string });
+const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY as string);
+
+export function safeParseJSON(text: string, defaultValue: any = null): any {
+  let cleaned = text.trim();
+  
+  const jsonStart = cleaned.indexOf('{');
+  const jsonEnd = cleaned.lastIndexOf('}');
+  const arrayStart = cleaned.indexOf('[');
+  const arrayEnd = cleaned.lastIndexOf(']');
+  
+  let start = -1;
+  let end = -1;
+  
+  if (jsonStart !== -1 && arrayStart !== -1) {
+    if (jsonStart < arrayStart) {
+      start = jsonStart;
+      end = jsonEnd;
+    } else {
+      start = arrayStart;
+      end = arrayEnd;
+    }
+  } else if (jsonStart !== -1) {
+    start = jsonStart;
+    end = jsonEnd;
+  } else if (arrayStart !== -1) {
+    start = arrayStart;
+    end = arrayEnd;
+  }
+  
+  if (start !== -1 && end !== -1) {
+    cleaned = cleaned.substring(start, end + 1);
+  }
+  
+  cleaned = cleaned.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
+  cleaned = cleaned.replace(/,(\s*[\]}])/g, '$1');
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error("Failed to parse JSON string:", cleaned, e);
+    if (defaultValue !== null) return defaultValue;
+    throw e;
+  }
+}
+
+export async function generateRecommendationFallback(prefs: TripPreferences): Promise<Recommendation> {
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-2.5-flash",
+    generationConfig: {
+      responseMimeType: "application/json",
+      temperature: 0.7,
+    }
+  });
+
+  const prompt = `You are a professional travel planner. Generate a highly detailed and realistic travel itinerary for the following preferences:
+  - Origin: ${prefs.origin}
+  - Destination: ${prefs.destination}
+  - Mood: ${prefs.mood}
+  - Budget: ${prefs.budget} ${prefs.currency}
+  - Duration: ${prefs.days} days
+  - Guests: ${prefs.guests}
+  - Start Date: ${prefs.startDate}
+  
+  You MUST return ONLY a valid JSON object matching this exact schema:
+  {
+    "destination": "string (the primary location)",
+    "title": "string (catchy trip title)",
+    "tagline": "string",
+    "summary": "string (1 paragraph overview)",
+    "best_time": "string",
+    "highlights": ["string", "string", "string"],
+    "daily_plan": [
+      {
+        "day": 1,
+        "title": "string",
+        "morning": "string",
+        "midday": "string",
+        "afternoon": "string",
+        "evening": "string",
+        "tip": "string",
+        "stay": "string"
+      }
+    ],
+    "cozy_tips": ["string", "string"],
+    "must_try_food": ["string", "string"],
+    "estimated_cost_breakdown": {
+      "accommodation": [{"item": "string", "source": "string", "calculation": "string", "cost": 0, "currency": "${prefs.currency}", "type": "fixed"}],
+      "food": [{"item": "string", "source": "string", "calculation": "string", "cost": 0, "currency": "${prefs.currency}", "type": "variable"}],
+      "transport": [{"item": "string", "source": "string", "calculation": "string", "cost": 0, "currency": "${prefs.currency}", "type": "fixed"}],
+      "activities": [{"item": "string", "source": "string", "calculation": "string", "cost": 0, "currency": "${prefs.currency}", "type": "fixed"}],
+      "other": [{"item": "string", "source": "string", "calculation": "string", "cost": 0, "currency": "${prefs.currency}", "type": "fixed"}],
+      "total": ${prefs.budget},
+      "confidence": "High"
+    }
+  }`;
+
+  const result = await model.generateContent(prompt);
+  return safeParseJSON(result.response.text());
+}
+
+export async function geminiChat(messages: { role: string; content: string }[]): Promise<string> {
+  const systemInstruction = `You are a helpful, friendly, and expert travel assistant. Your primary goal is to explain concepts, answer questions, and provide travel advice in the simplest, most accessible way possible for non-technical users.
+
+Follow these strict rules:
+1. NO JARGON: Avoid complex terminology. If you absolutely must use a technical term, immediately explain it using a simple real-world analogy.
+2. BE CONCISE: Get straight to the point. Avoid long, academic introductions.
+3. STRUCTURE: Use bullet points, bold text, and very short paragraphs to make your answers easy to skim.
+4. TONE: Be encouraging, patient, and conversational. Speak to the user like a helpful friend.
+5. CLARITY OVER DEPTH: Focus on giving the user a practical, high-level understanding rather than an exhaustive explanation.
+If you do not know the exact answer, simply say 'I don't have that information right now, but here is what I do know.'`;
+
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-2.5-flash",
+    systemInstruction
+  });
+  
+  const history = messages.slice(0, -1).map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }]
+  }));
+  
+  const lastMessage = messages[messages.length - 1].content;
+  
+  const chat = model.startChat({
+    history: history,
+    generationConfig: {
+      temperature: 0.4,
+      topP: 0.8,
+      topK: 40,
+    }
+  });
+
+  const result = await chat.sendMessage(lastMessage);
+  return result.response.text();
+}
 
 export async function createTripPlanStream(
   data: TripFormData,
   onChunk: (text: string) => void
 ) {
-  const model = "gemini-1.5-flash";
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
   
   const systemPrompt = `You are a world-class luxury and budget travel planner with deep knowledge of global destinations, hidden gems, and local logistics.
 Your goal is to create a highly detailed, engaging, and structured travel itinerary.
@@ -38,7 +172,7 @@ Output Structure (MANDATORY):
    - **MANDATORY**: Provide a direct booking or search link for each (e.g., [Book on Booking.com](https://www.booking.com/searchresults.html?ss=HotelName)). DO NOT include images.
 6. # Travel Options - How to get there from ${data.startLocation} (Flight, Train, Bus). 
    - **MANDATORY**: Provide booking search links for each (e.g., [Find Flights on Skyscanner](https://www.skyscanner.com/transport/flights/source/dest/), [Book Trains/Buses on Omio](https://www.omio.com/)). Include local transport tips. DO NOT include images.
-7. # Budget Breakdown Table - Create a Markdown table with columns: Category, Estimated Cost (${data.currency}), Notes. Categories: Stay, Travel, Food, Activities, Misc. Include a Total row. If the total exceeds ${data.budget}, flag it and suggest adjustments.
+7. # Budget Breakdown - See the detailed section below for a verified, itemized breakdown including sources and calculations.
 8. # Money-Saving Tips - Practical, local-specific hacks.
 9. # Travel Tips - Packing checklist, safety, etiquette.
 10. # [INTERNAL_DATA]
@@ -47,7 +181,46 @@ Output Structure (MANDATORY):
   { "id": "1", "name": "Name", "description": "Short desc", "lat": 0.0, "lng": 0.0, "day": 1 }
 ]
 </map_markers_json>
+
+<budget_json>
+{
+  "accommodation": [
+    { "item": "Mid-range Hotel in [Area]", "source": "Booking.com average for [City]", "calculation": "6 nights x $150", "cost": 900, "currency": "USD", "type": "fixed", "notes": "Price includes city tax" }
+  ],
+  "food": [
+    { "item": "Daily Meal Allowance", "source": "Travel guide average for [City]", "calculation": "7 days x $60", "cost": 420, "currency": "USD", "type": "variable", "notes": "Includes lunch formulas and coffee" }
+  ],
+  "transport": [
+    { "item": "Round-trip Flight (JFK-CDG)", "source": "Historical average (Air France)", "calculation": "1 ticket", "cost": 850, "currency": "USD", "type": "fixed" },
+    { "item": "Paris Visite Pass (Zones 1-5)", "source": "Official RATP 2026 rates", "calculation": "5-day pass", "cost": 80, "currency": "USD", "type": "fixed" }
+  ],
+  "activities": [
+    { "item": "Louvre Entry", "source": "Official Louvre website", "calculation": "1 adult", "cost": 30, "currency": "USD", "type": "fixed" }
+  ],
+  "other": [
+    { "item": "ETIAS Visa Waiver", "source": "Official europa.eu fee", "calculation": "1 authorization", "cost": 20, "currency": "USD", "type": "fixed" }
+  ],
+  "total": 2300,
+  "confidence": "High"
+}
+</budget_json>
 [END_INTERNAL_DATA]
+
+    [BUDGET_GUIDELINES]:
+    1. Act as a Smart Budget Analyzer Engine. Never return 0 or random values.
+    2. Base calculations on these multipliers for ${data.destination}:
+       - Accommodation: Budget (₹500-1500), Standard (₹1500-4000), Luxury (₹4000-15000+) per night.
+       - Food: Budget (₹300-600), Standard (₹700-1500), Luxury (₹2000-5000) per person/day.
+    3. Formulas:
+       - Accommodation = price_per_night × ${data.duration} nights.
+       - Food = daily_food_cost × ${data.guests} people × ${data.duration} days.
+       - Transportation = (Origin ${data.startLocation} to Destination ${data.destination} cost) + local transport.
+       - Activities = Estimate based on interests: ${data.preferences.join(', ')}.
+       - Other = 10% of subtotal.
+    4. Sourcing: Research current, verified pricing (Google Flights, Booking.com, TripAdvisor).
+    5. Validation: If a calculation fails, use fallback percentages of the total budget: Acc (35%), Food (20%), Trans (25%), Act (10%), Other (10%).
+    6. Ensure the grand total in budget_json is realistic for 2026.
+    7. Include a "confidence" score (High/Medium/Low) in the JSON.
 
 Style Guide:
 - Use emojis for flair.
@@ -57,13 +230,12 @@ Style Guide:
 - Render everything in Markdown.`;
 
   try {
-    const stream = await ai.models.generateContentStream({
-      model,
+    const result = await model.generateContentStream({
       contents: [{ role: "user", parts: [{ text: systemPrompt }] }],
     });
 
     let fullText = "";
-    for await (const chunk of stream) {
+    for await (const chunk of result.stream) {
       const chunkText = chunk.text || "";
       fullText += chunkText;
       onChunk(fullText);
@@ -76,30 +248,32 @@ Style Guide:
 }
 
 export async function extractTripDataFromVoice(transcript: string): Promise<any> {
-  const model = "gemini-1.5-flash";
-  const prompt = `Extract trip details from this voice transcript: "${transcript}". 
-Return ONLY a valid JSON object with these fields: 
-"startLocation" (string), 
-"destination" (string), 
-"budget" (number), 
-"currency" (string - 3-letter code),
-"duration" (number - days),
-"tripTypes" (array of strings - valid: "weekend", "family", "business", "romantic", "friends", "solo", "holiday"),
-"preferences" (array of strings - valid: "nature", "temples", "beaches", "food", "nightlife", "adventure", "shopping", "history", "wellness").
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-2.5-flash",
+    generationConfig: {
+      responseMimeType: "application/json"
+    }
+  });
 
-If a field is not found, omit it.
-Example: {"startLocation": "New York", "destination": "Paris", "budget": 5000, "currency": "USD", "duration": 7, "tripTypes": ["holiday"], "preferences": ["food", "history"]}?`;
+  const prompt = `Extract trip details from this voice transcript: "${transcript}". 
+  Return ONLY a valid JSON object with these fields: 
+  "startLocation" (string), 
+  "destination" (string), 
+  "budget" (number), 
+  "currency" (string - 3-letter code),
+  "duration" (number - days),
+  "tripTypes" (array of strings - valid: "weekend", "family", "business", "romantic", "friends", "solo", "holiday"),
+  "preferences" (array of strings - valid: "nature", "temples", "beaches", "food", "nightlife", "adventure", "shopping", "history", "wellness").
+  
+  If a field is not found, omit it.
+  Example: {"startLocation": "New York", "destination": "Paris", "budget": 5000, "currency": "USD", "duration": 7, "tripTypes": ["holiday"], "preferences": ["food", "history"]}?`;
 
   try {
-    const result = await ai.models.generateContent({
-      model,
+    const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: "application/json"
-      }
     });
 
-    return JSON.parse(result.text || "{}");
+    return safeParseJSON(result.response.text() || "{}", {});
   } catch (error) {
     console.error("Extraction error:", error);
     return null;
@@ -111,32 +285,39 @@ export async function chatWithGemini(
   onChunk: (text: string) => void,
   signal?: AbortSignal
 ) {
-  const model = "gemini-1.5-flash";
-  
-  const systemInstruction = `You are a helpful travel assistant for the Travel Planner application. 
-You can help users with travel advice, destination information, budget tips, and clarifying details about their itineraries.
-Keep your responses concise, friendly, and travel-oriented. Use emojis to make the conversation engaging.
-If the user asks about a specific destination or activity, provide practical and inspiring advice.
-Answer promptly and don't be overly verbose.`;
+  const systemInstruction = `You are a helpful, friendly, and expert travel assistant. Your primary goal is to explain concepts, answer questions, and provide travel advice in the simplest, most accessible way possible for non-technical users.
+
+Follow these strict rules:
+1. NO JARGON: Avoid complex terminology. If you absolutely must use a technical term, immediately explain it using a simple real-world analogy.
+2. BE CONCISE: Get straight to the point. Avoid long, academic introductions.
+3. STRUCTURE: Use bullet points, bold text, and very short paragraphs to make your answers easy to skim.
+4. TONE: Be encouraging, patient, and conversational. Speak to the user like a helpful friend.
+5. CLARITY OVER DEPTH: Focus on giving the user a practical, high-level understanding rather than an exhaustive explanation.
+If you do not know the exact answer, simply say 'I don't have that information right now, but here is what I do know.'`;
+
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-2.5-flash",
+    systemInstruction: systemInstruction,
+  });
 
   try {
     const formattedContents = messages.map(msg => ({
-      role: msg.role,
+      role: msg.role === 'model' ? 'model' : 'user',
       parts: [{ text: msg.content }]
     }));
 
-    const stream = await ai.models.generateContentStream({
-      model,
+    const result = await model.generateContentStream({
       contents: formattedContents,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
+      generationConfig: {
+        temperature: 0.4,
+        topP: 0.8,
+        topK: 40,
         maxOutputTokens: 1000,
       }
     });
 
     let fullText = "";
-    for await (const chunk of stream) {
+    for await (const chunk of result.stream) {
       if (signal?.aborted) {
         break;
       }
@@ -155,19 +336,18 @@ Answer promptly and don't be overly verbose.`;
 }
 
 export async function getVoiceSummary(itinerary: string): Promise<string> {
-  const model = "gemini-1.5-flash";
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
   const prompt = `Summarize this travel itinerary into a short, descriptive 2-3 sentence paragraph that is friendly and easy to read aloud by a voice assistant. Focus on the main highlights and vibe. Do not use special characters or markdown.
   
   Itinerary:
   ${itinerary}`;
 
   try {
-    const result = await ai.models.generateContent({
-      model,
+    const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }]
     });
 
-    return result.text || "Your trip is ready! Check the details on your screen.";
+    return result.response.text() || "Your trip is ready! Check the details on your screen.";
   } catch (error) {
     console.error("Voice summary error:", error);
     return "Your trip is ready! Here is your custom itinerary.";
@@ -175,7 +355,11 @@ export async function getVoiceSummary(itinerary: string): Promise<string> {
 }
 
 export async function getAlternativeDestinations(destination: string, budget: number, currency: string): Promise<any[]> {
-  const model = "gemini-1.5-flash";
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-2.5-flash",
+    generationConfig: { responseMimeType: "application/json" }
+  });
+
   const prompt = `The user wants to go to "${destination}" with a budget of ${budget} ${currency}. 
   If this budget is realistically too low for a comfortable 5-7 day trip, suggest 3 similar destinations with a lower cost of living but a similar "vibe" (e.g., if they chose Swiss Alps, suggest Tatra Mountains or Georgia).
   If the budget is sufficient, you can still suggest unique alternatives.
@@ -185,23 +369,31 @@ export async function getAlternativeDestinations(destination: string, budget: nu
   "reason" (string - why it is similar but cheaper), 
   "estimatedBudget" (number - for 5 days in ${currency}), 
   "vibeMatch" (number 1-100).`;
-
+  
   try {
-    const result = await ai.models.generateContent({
-      model,
+    const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { responseMimeType: "application/json" }
     });
 
-    return JSON.parse(result.text || "[]");
+    return safeParseJSON(result.response.text() || "[]", []);
   } catch (error) {
     console.error("Alternative destinations error:", error);
     return [];
   }
 }
 
+import { fetchMoodRecommendations } from "../api/client";
+
 export async function getMoodRecommendations(mood: string, budget: number, currency: string): Promise<any[]> {
-  const model = "gemini-1.5-flash";
+  // Try the online backend API first
+  const onlineResults = await fetchMoodRecommendations(mood, budget, currency);
+  if (onlineResults && onlineResults.length > 0) return onlineResults;
+
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-2.5-flash",
+    generationConfig: { responseMimeType: "application/json" }
+  });
+
   const prompt = `The user is feeling "${mood}" and has a budget of ${budget} ${currency} for a 1-week trip.
   Suggest 3 diverse destinations (1 domestic-ish, 2 international) that match this mood and fit this budget.
   
@@ -215,13 +407,11 @@ export async function getMoodRecommendations(mood: string, budget: number, curre
   `;
 
   try {
-    const result = await ai.models.generateContent({
-      model,
+    const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { responseMimeType: "application/json" }
     });
 
-    return JSON.parse(result.text || "[]");
+    return safeParseJSON(result.response.text() || "[]", []);
   } catch (error) {
     console.error("Mood recommendations error:", error);
     
@@ -250,7 +440,11 @@ export async function getMoodRecommendations(mood: string, budget: number, curre
 }
 
 export async function getSeasonalRecommendations(userLocation: string = "India"): Promise<any> {
-  const model = "gemini-1.5-flash";
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-2.5-flash",
+    generationConfig: { responseMimeType: "application/json" }
+  });
+
   const now = new Date();
   const month = now.toLocaleString('default', { month: 'long' });
   
@@ -261,17 +455,16 @@ export async function getSeasonalRecommendations(userLocation: string = "India")
   2. National: Popular and seasonally perfect spots within the same country as ${userLocation}.
   3. Global: The best international places to visit right now (e.g. for weather, festivals, or off-season deals).
 
+
   Return ONLY a JSON object with keys "nearby", "national", "global". 
   Each key should be an array of 3 objects: { "name": string, "description": string, "highlight": string, "type": "nature" | "city" | "beach" | "culture" }.`;
 
   try {
-    const result = await ai.models.generateContent({
-      model,
+    const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { responseMimeType: "application/json" }
     });
 
-    return JSON.parse(result.text || "{}");
+    return safeParseJSON(result.response.text() || "{}", {});
   } catch (error) {
     console.error("Seasonal recommendations error:", error);
     

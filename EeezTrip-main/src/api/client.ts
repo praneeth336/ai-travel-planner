@@ -2,23 +2,30 @@ import { PlaceImage, Recommendation, TripPreferences } from '../types';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
+import { generateRecommendationFallback } from '../lib/gemini';
+
 export async function fetchRecommendation(prefs: TripPreferences): Promise<Recommendation> {
-  const res = await fetch(`${BASE}/recommend`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(prefs),
-  });
+  try {
+    const res = await fetch(`${BASE}/recommend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prefs),
+    });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    let errMsg = 'Unable to generate recommendation right now.';
-    if (err.detail) {
-      errMsg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+    if (!res.ok) {
+      throw new Error("Backend failed");
     }
-    throw new Error(errMsg);
-  }
 
-  return res.json();
+    return await res.json();
+  } catch (error) {
+    console.warn("Backend offline or failed, falling back to client-side generation...");
+    try {
+      return await generateRecommendationFallback(prefs);
+    } catch (fallbackError) {
+      console.error("Fallback generation failed:", fallbackError);
+      throw new Error('Unable to generate recommendation right now.');
+    }
+  }
 }
 
 export async function fetchImages(
@@ -138,6 +145,24 @@ export async function reviseRecommendation(
   return res.json();
 }
 
+export async function fetchMoodRecommendations(
+  mood: string,
+  budget: number,
+  currency: string = 'INR',
+): Promise<any[]> {
+  try {
+    const res = await fetch(`${BASE}/mood`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mood, budget, currency }),
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchWeatherAlternatives(
   destination: string,
   condition: string,
@@ -184,6 +209,19 @@ export async function submitReview(review: any): Promise<boolean> {
   }
 }
 
+export async function likeReview(reviewId: string): Promise<any> {
+  try {
+    const res = await fetch(`${BASE}/reviews/${encodeURIComponent(reviewId)}/like`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchTripsFromDB(userId: string = "all"): Promise<any[]> {
   try {
     const res = await fetch(`${BASE}/trips?user_id=${encodeURIComponent(userId)}&limit=50`);
@@ -192,5 +230,36 @@ export async function fetchTripsFromDB(userId: string = "all"): Promise<any[]> {
     return data.trips || [];
   } catch {
     return [];
+  }
+}
+
+export async function saveTripToDB(userId: string, trip: Recommendation, preferences: TripPreferences, label?: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${BASE}/trips`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        trip,
+        preferences,
+        label: label || trip.destination || 'My Trip',
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.id || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteTripFromDB(tripId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/trips/${tripId}`, {
+      method: 'DELETE',
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }

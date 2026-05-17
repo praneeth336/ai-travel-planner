@@ -7,6 +7,10 @@ import { MapMarker } from '../types';
 import { User } from 'firebase/auth';
 import { db, collection, addDoc, serverTimestamp, handleFirestoreError, OperationType } from '../lib/firebase';
 import { SmartImage } from './SmartImage';
+import { BudgetBreakdown } from './BudgetBreakdown';
+import { useTripStore } from '../state/tripStore';
+import { ErrorBoundary } from './ErrorBoundary';
+import { safeParseJSON } from '../lib/gemini';
 
 interface ItineraryDisplayProps {
   content: string;
@@ -22,11 +26,13 @@ export function ItineraryDisplay({ content, isComplete, user, onSave, onLogin }:
   const [isSaved, setIsSaved] = useState(false);
   const [visitedIds, setVisitedIds] = useState<Set<string>>(new Set());
   const [highlightedMarkerId, setHighlightedMarkerId] = useState<string | null>(null);
+  const { state: globalState } = useTripStore();
   const mapRef = React.useRef<HTMLDivElement>(null);
 
   // Parse metadata and markers from markdown content
-  const { filteredContent, markers, title, destination, heroUrl, summary } = useMemo(() => {
+  const { filteredContent, markers, budget, title, destination, heroUrl, summary } = useMemo(() => {
     const markerTagRegex = /<map_markers_json>([\s\S]*?)<\/map_markers_json>/i;
+    const budgetTagRegex = /<budget_json>([\s\S]*?)<\/budget_json>/i;
     const internalBlockRegex = /#+ \[?INTERNAL_DATA\]?[\s\S]*?\[?END_INTERNAL_DATA\]?/gi;
     
     let match = content.match(markerTagRegex);
@@ -34,9 +40,47 @@ export function ItineraryDisplay({ content, isComplete, user, onSave, onLogin }:
     
     if (match) {
       try {
-        parsedMarkers = JSON.parse(match[1]);
+        parsedMarkers = safeParseJSON(match[1], []);
       } catch (e) {
         console.error("Failed to parse markers JSON", e);
+      }
+    }
+
+    let budgetMatch = content.match(budgetTagRegex);
+    let parsedBudget: any = null;
+    if (budgetMatch) {
+      try {
+        console.log("Budget AI Inputs:", { content: budgetMatch[1], preferences: globalState.preferences });
+        const p = safeParseJSON(budgetMatch[1]);
+        if (p && typeof p === 'object' && !Array.isArray(p)) {
+          // Senior Engineer Request: Validation & Fallback logic
+          const sumCat = (items: any) => Array.isArray(items) ? items.reduce((acc: number, i: any) => acc + (Number(i.cost) || 0), 0) : 0;
+          
+          const accCost = sumCat(p.accommodation);
+          const foodCost = sumCat(p.food);
+          const transCost = sumCat(p.transport);
+          const actCost = sumCat(p.activities);
+          const otherCost = sumCat(p.other);
+
+          const userBudget = globalState.preferences.budget;
+          
+          // If all major categories are 0 or empty, trigger fallback
+          if (accCost === 0 && foodCost === 0 && transCost === 0 && userBudget > 0) {
+            console.warn("Budget AI returned zeros. Triggering fallback engine...");
+            p.accommodation = [{ item: "Accommodation (Estimated)", cost: Math.round(userBudget * 0.35), source: "Fallback Analysis", calculation: "35% of target budget", type: "fixed" }];
+            p.food = [{ item: "Food & Dining (Estimated)", cost: Math.round(userBudget * 0.20), source: "Fallback Analysis", calculation: "20% of target budget", type: "variable" }];
+            p.transport = [{ item: "Transportation (Estimated)", cost: Math.round(userBudget * 0.25), source: "Fallback Analysis", calculation: "25% of target budget", type: "fixed" }];
+            p.activities = [{ item: "Activities (Estimated)", cost: Math.round(userBudget * 0.10), source: "Fallback Analysis", calculation: "10% of target budget", type: "fixed" }];
+            p.other = [{ item: "Miscellaneous (Estimated)", cost: Math.round(userBudget * 0.10), source: "Fallback Analysis", calculation: "10% of target budget", type: "fixed" }];
+            p.total = userBudget;
+            p.confidence = "Low";
+          }
+          
+          parsedBudget = p;
+          console.log("Budget AI Output:", parsedBudget);
+        }
+      } catch (e) {
+        console.error("Failed to parse budget JSON", e);
       }
     }
     
@@ -55,6 +99,7 @@ export function ItineraryDisplay({ content, isComplete, user, onSave, onLogin }:
     let cleanContent = content
       .replace(internalBlockRegex, '')
       .replace(/<map_markers_json>([\s\S]*?)<\/map_markers_json>/i, '')
+      .replace(/<budget_json>([\s\S]*?)<\/budget_json>/i, '')
       .replace(/#+ Markers[\s\S]*?(?=($|#))/gi, '')
       .replace(/!\[.*?\]\(.*?\)/g, '') // Hide all markdown images in content
       .trim();
@@ -66,6 +111,7 @@ export function ItineraryDisplay({ content, isComplete, user, onSave, onLogin }:
     return { 
       filteredContent: cleanContent, 
       markers: parsedMarkers, 
+      budget: parsedBudget,
       title: extractedTitle, 
       destination: extractedDestination, 
       heroUrl,
@@ -150,7 +196,7 @@ export function ItineraryDisplay({ content, isComplete, user, onSave, onLogin }:
   if (!content) return null;
 
   return (
-    <div className="space-y-6">
+    <div ref={mapRef} className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <div className="px-3 py-1 bg-brand-amber text-brand-navy text-[10px] font-black uppercase tracking-widest rounded-md">
@@ -368,6 +414,20 @@ export function ItineraryDisplay({ content, isComplete, user, onSave, onLogin }:
             {filteredContent}
           </ReactMarkdown>
         </div>
+
+        {budget && (
+          <ErrorBoundary>
+            <BudgetBreakdown 
+              budget={budget} 
+              targetBudget={globalState.preferences.budget} 
+              currency={globalState.preferences.currency}
+              days={globalState.preferences.days}
+              guests={Number(globalState.preferences.guests) || 1}
+              destination={destination}
+              origin={globalState.preferences.origin}
+            />
+          </ErrorBoundary>
+        )}
       </motion.div>
       
       {!isComplete && (

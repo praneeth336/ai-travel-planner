@@ -20,8 +20,7 @@ export default function DashboardPage() {
       }
       
       try {
-        // Fetch all trips (including mock data) to populate the dashboard
-        const fetched = await fetchTripsFromDB('all');
+        const fetched = await fetchTripsFromDB(auth.currentUser.uid);
         if (active) {
           setTrips(fetched);
         }
